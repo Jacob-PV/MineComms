@@ -16,13 +16,31 @@
         app:layout_constraintTop_toTopOf="parent" />
 
     <Button
+        android:id="@+id/connection_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:onClick="connectionView"
+        android:text="Connection"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+    <Button
+        android:id="@+id/photos_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:onClick="photosView"
+        android:text="Photos"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/connection_button" />
+
+    <Button
         android:id="@+id/camera_button"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:onClick="cameraView"
         android:text="Camera"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent" />
+        app:layout_constraintBottom_toTopOf="@id/photos_button" />
 
     <Button
         android:id="@+id/account_button"
