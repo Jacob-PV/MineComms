@@ -23,6 +23,9 @@ interface UserDao {
             "password LIKE :pass LIMIT 1")
     fun findByName(user: String, pass: String): User?
 
+    @Query("SELECT * FROM user WHERE isLogged = 1 LIMIT 1")
+    fun findActive(): User?
+
     @Insert
     fun insertAll(vararg users: User)
 

@@ -16,7 +16,7 @@ import java.sql.Types.NULL
 
 class Account : AppCompatActivity() {
     private lateinit var viewBinding: ActivityAccountBinding
-    private var currentUser : String = ""
+    var currentUser : String = ""
 //    val db = Room.databaseBuilder(
 //        applicationContext,
 //        AppDatabase::class.java, "database-name"
@@ -65,6 +65,10 @@ class Account : AppCompatActivity() {
     private fun displayUsers() {
         val userList : List<User> = db().userDao().getAll()
         Log.d("DU", userList.toString())
+    }
+
+    public fun getUser() : String {
+        return this.currentUser
     }
 
     private fun login() {
