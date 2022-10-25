@@ -1,8 +1,9 @@
 package com.example.minecomms
 
+//import com.google.android.gms.common.util.IOUtils.copyStream
+
 import android.Manifest
 import android.content.Context
-import android.content.DialogInterface
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
@@ -12,31 +13,48 @@ import androidx.collection.SimpleArrayMap
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.room.Room
-import com.google.android.gms.nearby.Nearby
-import com.google.android.gms.nearby.connection.*
-import com.google.android.gms.tasks.OnFailureListener
-import com.google.android.gms.tasks.OnSuccessListener
-
-import com.example.minecomms.Account
-import com.example.minecomms.databinding.ActivityAccountBinding
+import com.example.minecomms.Connection.SerializationHelper.serialize
 import com.example.minecomms.databinding.ActivityConnectionBinding
 import com.example.minecomms.db.AppDatabase
+import com.google.android.gms.nearby.Nearby
+import com.google.android.gms.nearby.connection.*
+import java.io.*
+import java.sql.Timestamp
 
 
+// RENAME TO CONNECTION IF USING AGAIN
 class Connection : AppCompatActivity() {
     private val TAG = "Connection"
     private val SERVICE_ID = "Nearby"
     private val STRATEGY: Strategy = Strategy.P2P_CLUSTER
     private val context: Context = this
 
+    private var isAdvertising = false;
+    private var eid : String = ""
+
+
     private val incomingFilePayloads = SimpleArrayMap<Long, Payload>()
     private val completedFilePayloads = SimpleArrayMap<Long, Payload>()
 
     private lateinit var viewBinding: ActivityConnectionBinding
 
+//    private var rcvdFilename: String? = null
+//    private var policyMsg: String? = null
+//    private var receiverRLindex: Int = -1
+//    private var imageItem: ImageListItem? = null
+
+    private val READ_REQUEST_CODE = 42
+    private val ENDPOINT_ID_EXTRA = "com.foo.myapp.EndpointId"
+
+
+
     companion object {
         private const val LOCATION_PERMISSION_CODE = 100
         private const val READ_PERMISSION_CODE = 101
+
+        private const val OWN_IMAGE_FOLDER = "own_images"
+        private const val COLLECTED_IMAGE_FOLDER = "collected_images"
+        private const val ENCRYPTED_PREFIX = "encrypted"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,10 +63,8 @@ class Connection : AppCompatActivity() {
 
         checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, LOCATION_PERMISSION_CODE)
 
-
         viewBinding = ActivityConnectionBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
-
 
         viewBinding.discoverButton.setOnClickListener { startDiscovery() }
         viewBinding.advertiseButton.setOnClickListener { startAdvertising() }
@@ -96,6 +112,7 @@ class Connection : AppCompatActivity() {
             )
             .addOnSuccessListener { unused: Void? ->
                 connectionReport.text = "Advertising..." + getLocalUserName()
+                this.isAdvertising = true
             }
             .addOnFailureListener { e: Exception? -> }
     }
@@ -103,6 +120,7 @@ class Connection : AppCompatActivity() {
     private fun startDiscovery() {
         val discoveryOptions: DiscoveryOptions = DiscoveryOptions.Builder().setStrategy(STRATEGY).build()
         val connectionReport: TextView = findViewById<TextView>(R.id.connection_report)
+        this.isAdvertising = false
 
         Nearby.getConnectionsClient(context)
             .startDiscovery(SERVICE_ID, endpointDiscoveryCallback, discoveryOptions)
@@ -118,10 +136,8 @@ class Connection : AppCompatActivity() {
                 // An endpoint was found. We request a connection to it.
                 Nearby.getConnectionsClient(context)
                     .requestConnection(getLocalUserName(), endpointId, connectionLifecycleCallback)
-                    .addOnSuccessListener(
-                        OnSuccessListener { unused: Void? -> })
-                    .addOnFailureListener(
-                        OnFailureListener { e: java.lang.Exception? -> })
+                    .addOnSuccessListener { unused: Void? -> }
+                    .addOnFailureListener { e: java.lang.Exception? -> }
             }
 
             override fun onEndpointLost(endpointId: String) {
@@ -129,11 +145,8 @@ class Connection : AppCompatActivity() {
             }
         }
 
-
-
     private val connectionLifecycleCallback: ConnectionLifecycleCallback =
         object : ConnectionLifecycleCallback() {
-
             override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
                 // Automatically accept the connection on both sides.
                 Nearby.getConnectionsClient(context).acceptConnection(endpointId, payloadCallback)
@@ -145,7 +158,12 @@ class Connection : AppCompatActivity() {
                 when (result.status.statusCode) {
                     ConnectionsStatusCodes.STATUS_OK -> {
                         connectionReport.text = "Connection Made!"
-//                        sendPayload(endpointId, -1)
+                        val timestamp = Timestamp(System.currentTimeMillis())
+
+                        val bytesPayload = Payload.fromBytes(serialize(timestamp))
+                        Log.d("MESSAGE", bytesPayload.toString())
+                        if(isAdvertising)
+                            Nearby.getConnectionsClient(context).sendPayload(endpointId, bytesPayload)
                     }
                     ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED -> {}
                     ConnectionsStatusCodes.STATUS_ERROR -> {}
@@ -161,107 +179,43 @@ class Connection : AppCompatActivity() {
 
     private val payloadCallback: PayloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            // A new payload is being sent over.
-            Log.d(TAG, "Payload Received")
-            when (payload.type) {
-                Payload.Type.BYTES -> {
-//                    var rcvdFilename = String(payload.asBytes()!!, StandardCharsets.UTF_8)
-                    Log.d(TAG, payload.asBytes().toString())
-                    val dataDisplay: TextView = findViewById<TextView>(R.id.data_received)
-                    dataDisplay.text = payload.asBytes().toString()
-                }
-//                Payload.Type.FILE -> {
-//                    // Add this to our tracking map, so that we can retrieve the payload later.
-//                    incomingFilePayloads.put(payload.id, payload);
-//                }
-//                Payload.Type.STREAM -> {
-//                    Log.d(TAG, "Inside file mode")
-//                }
+            // This always gets the full data of the payload. Is null if it's not a BYTES payload.
+            if (payload.type == Payload.Type.BYTES) {
+                val receivedBytes = SerializationHelper.deserialize(payload.asBytes())
+                Log.d("MESSAGE", receivedBytes.toString())
+
+                val dataDisplay: TextView = findViewById<TextView>(R.id.data_received)
+                dataDisplay.text = "Message: $receivedBytes"
             }
         }
 
-
-        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
-            val dataDisplay: TextView = findViewById<TextView>(R.id.data_received)
-
-
-//            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
-//                val payloadId = update.payloadId
-//                val payload = incomingFilePayloads.remove(payloadId)
-//                completedFilePayloads.put(payloadId, payload)
-//                if (payload != null && payload.type == Payload.Type.FILE) {
-////                    val isDone = processFilePayload(payloadId, endpointId)
-//                    val isDone = true // REPLACE JUST A TEST
-//                    if (isDone) {
-//                        Log.d(TAG, "above")
-//                        Log.d(TAG, payload.toString())
-//                        Log.d(TAG, "below")
-//                        Nearby.getConnectionsClient(context).disconnectFromEndpoint(endpointId) //test
-//                    }
-//                }
-//            }
-            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
-                val payloadId = update.payloadId
-                val payload = incomingFilePayloads.remove(payloadId)
-                completedFilePayloads.put(payloadId, payload)
-                Log.d(TAG, "successful send")
-//                count++
-                dataDisplay.text = payload?.asBytes().toString()
-
-                if (payload != null && payload.type == Payload.Type.FILE) {
-//                    val isDone = processFilePayload(payloadId, endpointId)
-                    val isDone = false
-
-                    if (isDone) {
-                        Nearby.getConnectionsClient(context)
-                            .disconnectFromEndpoint(endpointId) //test
-                    }
-                }
-            }
-//            if (update.status === PayloadTransferUpdate.Status.SUCCESS) {
-//                val payloadId = update.payloadId
-//                val payload = incomingFilePayloads.remove(payloadId)
-//                completedFilePayloads.put(payloadId, payload)
-//                if (payload!!.type == Payload.Type.FILE) {
-//                    processFilePayload(payloadId)
-//                }
-//            }
+        override fun onPayloadTransferUpdate(
+            endpointId: String,
+            update: PayloadTransferUpdate
+        ) {
+            // Bytes payloads are sent as a single chunk, so you'll receive a SUCCESS update immediately
+            // after the call to onPayloadReceived().
         }
     }
 
-//    fun onConnectionInitiated(endpointId: String?, info: ConnectionInfo) {
-//        Builder(context)
-//            .setTitle("Accept connection to " + info.endpointName)
-//            .setMessage("Confirm the code matches on both devices: " + info.authenticationDigits)
-//            .setPositiveButton(
-//                "Accept"
-//            ) { dialog: DialogInterface?, which: Int ->  // The user confirmed, so we can accept the connection.
-//                Nearby.getConnectionsClient(context)
-//                    .acceptConnection(endpointId!!, payloadCallback)
-//            }
-//            .setNegativeButton(
-//                android.R.string.cancel
-//            ) { dialog: DialogInterface?, which: Int ->  // The user canceled, so we should reject the connection.
-//                Nearby.getConnectionsClient(context).rejectConnection(endpointId!!)
-//            }
-//            .setIcon(android.R.drawable.ic_dialog_alert)
-//            .show()
-//    }
+    /** Helper class to serialize and deserialize an Object to byte[] and vice-versa  */
+    object SerializationHelper {
+        @Throws(IOException::class)
+        fun serialize(`object`: Any?): ByteArray {
+            val byteArrayOutputStream = ByteArrayOutputStream()
+            val objectOutputStream = ObjectOutputStream(byteArrayOutputStream)
+            // transform object to stream and then to a byte array
+            objectOutputStream.writeObject(`object`)
+            objectOutputStream.flush()
+            objectOutputStream.close()
+            return byteArrayOutputStream.toByteArray()
+        }
 
-//    Payload bytesPayload = Payload.fromBytes(new byte[] {0xa, 0xb, 0xc, 0xd});
-//    Nearby.getConnectionsClient(context).sendPayload(toEndpointId, bytesPayload);
-
-//    internal class ReceiveBytesPayloadListener : PayloadCallback() {
-//        override fun onPayloadReceived(endpointId: String, payload: Payload) {
-//            // This always gets the full data of the payload. Is null if it's not a BYTES payload.
-//            if (payload.type == Payload.Type.BYTES) {
-//                val receivedBytes = payload.asBytes()
-//            }
-//        }
-//
-//        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
-//            // Bytes payloads are sent as a single chunk, so you'll receive a SUCCESS update immediately
-//            // after the call to onPayloadReceived().
-//        }
-//    }
+        @Throws(IOException::class, ClassNotFoundException::class)
+        fun deserialize(bytes: ByteArray?): Any {
+            val byteArrayInputStream = ByteArrayInputStream(bytes)
+            val objectInputStream = ObjectInputStream(byteArrayInputStream)
+            return objectInputStream.readObject()
+        }
+    }
 }
