@@ -35,6 +35,7 @@ class Account : AppCompatActivity() {
         viewBinding.addUserButton.setOnClickListener { saveNewUser() }
         viewBinding.listUsersButton.setOnClickListener { displayUsers() }
         viewBinding.loginButton.setOnClickListener { login() }
+        viewBinding.logoutButton.setOnClickListener { logout() }
 
         this.currentUser = this.checkLogged()
         this.displayCurrentUser()
@@ -89,6 +90,15 @@ class Account : AppCompatActivity() {
         // clear inputs ui
         username.text.clear()
         password.text.clear()
+    }
+
+    private fun logout() {
+        val user = db().userDao().findActive()
+        if (user != null) {
+            db().userDao().log_in_out(user.uid, false)
+            this.currentUser = ""
+            displayCurrentUser()
+        }
     }
 
     private fun checkLogged(): String {

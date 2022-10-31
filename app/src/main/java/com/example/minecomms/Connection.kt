@@ -219,3 +219,42 @@ class Connection : AppCompatActivity() {
         }
     }
 }
+
+//    private fun showImageChooser(endpointId: String) {
+//        this.eid = endpointId
+//        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+//        intent.addCategory(Intent.CATEGORY_OPENABLE)
+//        intent.type = "image/*"
+//        intent.putExtra(ENDPOINT_ID_EXTRA, endpointId)
+//        startActivityForResult(intent, READ_REQUEST_CODE)
+//        Log.d(TAG, "end img")
+//    }
+//
+//    override fun onActivityResult(requestCode: Int, resultCode: Int, resultData: Intent?) {
+//        super.onActivityResult(requestCode, resultCode, resultData)
+//        if (requestCode == READ_REQUEST_CODE && resultCode == RESULT_OK && resultData != null) {
+//            val endpointId = resultData.getStringExtra(ENDPOINT_ID_EXTRA)
+//
+//            // The URI of the file selected by the user.
+//            val uri: Uri? = resultData.data
+//            val filePayload: Payload = try {
+//                // Open the ParcelFileDescriptor for this URI with read access.
+//                val pfd = uri?.let { contentResolver.openFileDescriptor(it, "r") }
+//                Payload.fromFile(pfd!!)
+//            } catch (e: FileNotFoundException) {
+//                Log.e("MyApp", "File not found", e)
+//                return
+//            }
+//
+//            // Construct a simple message mapping the ID of the file payload to the desired filename.
+//            val filenameMessage = filePayload.id.toString() + ":" + uri.lastPathSegment
+//
+//            // Send the filename message as a bytes payload.
+//            val filenameBytesPayload =
+//                Payload.fromBytes(filenameMessage.toByteArray(StandardCharsets.UTF_8))
+//            Nearby.getConnectionsClient(context).sendPayload(endpointId!!, filenameBytesPayload)
+//
+//            // Finally, send the file payload.
+//            Nearby.getConnectionsClient(context).sendPayload(endpointId, filePayload)
+//        }
+//    }
