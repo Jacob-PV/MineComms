@@ -27,6 +27,7 @@ class Photos : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode == RESULT_OK && requestCode == pickImage) {
             imageUri = data?.data
+//            imageUri = "content://com.google.android.gms.fileprovider/nearby_connections_files/-9021211736305820804" as Uri
             imageView.setImageURI(imageUri)
         }
     }

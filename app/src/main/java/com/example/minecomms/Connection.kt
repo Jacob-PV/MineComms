@@ -1,25 +1,30 @@
 package com.example.minecomms
 
-//import com.google.android.gms.common.util.IOUtils.copyStream
-
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build.VERSION
+import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.util.Log
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.collection.SimpleArrayMap
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.room.Room
-import com.example.minecomms.Connection.SerializationHelper.serialize
 import com.example.minecomms.databinding.ActivityConnectionBinding
 import com.example.minecomms.db.AppDatabase
+//import com.google.android.gms.common.util.IOUtils.copyStream
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
+import com.google.android.gms.tasks.OnFailureListener
+import com.google.android.gms.tasks.OnSuccessListener
 import java.io.*
-import java.sql.Timestamp
+import java.nio.charset.StandardCharsets
 
 
 // RENAME TO CONNECTION IF USING AGAIN
@@ -120,7 +125,6 @@ class Connection : AppCompatActivity() {
     private fun startDiscovery() {
         val discoveryOptions: DiscoveryOptions = DiscoveryOptions.Builder().setStrategy(STRATEGY).build()
         val connectionReport: TextView = findViewById<TextView>(R.id.connection_report)
-        this.isAdvertising = false
 
         Nearby.getConnectionsClient(context)
             .startDiscovery(SERVICE_ID, endpointDiscoveryCallback, discoveryOptions)
@@ -130,14 +134,224 @@ class Connection : AppCompatActivity() {
             .addOnFailureListener { e: java.lang.Exception? -> }
     }
 
+    /**
+     * Fires an intent to spin up the file chooser UI and select an image for sending to endpointId.
+     */
+    private fun showImageChooser(endpointId: String) {
+        this.eid = endpointId
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.type = "image/*"
+        intent.putExtra(ENDPOINT_ID_EXTRA, endpointId)
+        startActivityForResult(intent, READ_REQUEST_CODE)
+        Log.d(TAG, "end img")
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, resultData: Intent?) {
+        super.onActivityResult(requestCode, resultCode, resultData)
+        if (requestCode == READ_REQUEST_CODE && resultCode == RESULT_OK && resultData != null) {
+//            val endpointId = resultData.getStringExtra(ENDPOINT_ID_EXTRA)
+            val endpointId = this.eid
+            Log.d("EID", endpointId.toString())
+
+            // The URI of the file selected by the user.
+            val uri = resultData.data
+            val filePayload: Payload
+            filePayload = try {
+                // Open the ParcelFileDescriptor for this URI with read access.
+                val pfd = contentResolver.openFileDescriptor(uri!!, "r")
+                Payload.fromFile(pfd!!)
+            } catch (e: FileNotFoundException) {
+                Log.e("MyApp", "File not found", e)
+                return
+            }
+
+            // Construct a simple message mapping the ID of the file payload to the desired filename.
+            val filenameMessage = filePayload.id.toString() + ":" + uri.lastPathSegment
+
+            Log.d("FILENAME", filenameMessage)
+
+            // Send the filename message as a bytes payload.
+            val filenameBytesPayload =
+                Payload.fromBytes(filenameMessage.toByteArray(StandardCharsets.UTF_8))
+            Nearby.getConnectionsClient(context).sendPayload(endpointId!!, filenameBytesPayload)
+
+            // Finally, send the file payload.
+
+
+
+            if(endpointId != null) {
+                Log.d(TAG, "in result")
+
+                Nearby.getConnectionsClient(context).sendPayload(endpointId, filePayload).addOnSuccessListener {
+                    Log.d(TAG, "successful send?")
+                }
+            }
+        }
+    }
+    private fun sendPayLoad(endPointId: String, filePayload: Payload) {
+        Log.d(TAG, context.filesDir.toString())
+//        val fileToSend = File(context.filesDir, "C:/Users/jacob/Code/MineComms/app/src/main/java/com/example/minecomms/img.png")
+        try {
+            Log.d(TAG, "sending file?")
+//            val filePayload = Payload.fromFile(fileToSend)
+            Nearby.getConnectionsClient(context).sendPayload(endPointId, filePayload)
+        } catch (e: FileNotFoundException) {
+            Log.e("MyApp", "File not found", e)
+        }
+
+    }
+
+    internal class ReceiveFilePayloadCallback(private val context: Context) :
+        PayloadCallback() {
+        private val incomingFilePayloads = SimpleArrayMap<Long, Payload>()
+        private val completedFilePayloads = SimpleArrayMap<Long, Payload?>()
+        private val filePayloadFilenames = SimpleArrayMap<Long, String>()
+        override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            if (payload.type == Payload.Type.BYTES) {
+                val payloadFilenameMessage = String(payload.asBytes()!!, StandardCharsets.UTF_8)
+                val payloadId = addPayloadFilename(payloadFilenameMessage)
+                processFilePayload(payloadId)
+            } else if (payload.type == Payload.Type.FILE) {
+                Log.d("CON", "IN PAY REC")
+                // Add this to our tracking map, so that we can retrieve the payload later.
+                incomingFilePayloads.put(payload.id, payload)
+            }
+        }
+
+        /**
+         * Extracts the payloadId and filename from the message and stores it in the
+         * filePayloadFilenames map. The format is payloadId:filename.
+         */
+        private fun addPayloadFilename(payloadFilenameMessage: String): Long {
+            val parts = payloadFilenameMessage.split(":").toTypedArray()
+            val payloadId = parts[0].toLong()
+            val filename = parts[1]
+            Log.d("NAME", filename)
+
+            filePayloadFilenames.put(payloadId, filename)
+            return payloadId
+        }
+
+        private fun processFilePayload(payloadId: Long) {
+
+            processFilePayload2(payloadId)
+
+//            // BYTES and FILE could be received in any order, so we call when either the BYTES or the FILE
+//            // payload is completely received. The file payload is considered complete only when both have
+//            // been received.
+//            val filePayload = completedFilePayloads[payloadId]
+//            val filename = filePayloadFilenames[payloadId]
+//            if (filePayload != null && filename != null) {
+//                completedFilePayloads.remove(payloadId)
+//                filePayloadFilenames.remove(payloadId)
+//
+//                // Get the received file (which will be in the Downloads folder)
+//                // Because of https://developer.android.com/preview/privacy/scoped-storage, we are not
+//                // allowed to access filepaths from another process directly. Instead, we must open the
+//                // uri using our ContentResolver.
+//                val uri = filePayload.asFile()!!.asUri()
+//                try {
+//                    // Copy the file to a new location.
+//                    val `in`: InputStream? = context.contentResolver.openInputStream(uri!!)
+//                    copyStream(
+//                        `in`, FileOutputStream(
+//                            File(
+//                                context.cacheDir, filename
+//                            )
+//                        )
+//                    )
+//                } catch (e: IOException) {
+//                    // Log the error.
+//                } finally {
+//                    // Delete the original file.
+//                    context.contentResolver.delete(uri!!, null, null)
+//                }
+//            }
+        }
+
+        // add removed tag back to fix b/183037922
+        private fun processFilePayload2(payloadId: Long) {
+            // BYTES and FILE could be received in any order, so we call when either the BYTES or the FILE
+            // payload is completely received. The file payload is considered complete only when both have
+            // been received.
+            val filePayload = completedFilePayloads[payloadId]
+            val filename = filePayloadFilenames[payloadId]
+            if (filePayload != null && filename != null) {
+                completedFilePayloads.remove(payloadId)
+                filePayloadFilenames.remove(payloadId)
+
+                // Get the received file (which will be in the Downloads folder)
+                if (VERSION.SDK_INT >= VERSION_CODES.Q) {
+                    // Because of https://developer.android.com/preview/privacy/scoped-storage, we are not
+                    // allowed to access filepaths from another process directly. Instead, we must open the
+                    // uri using our ContentResolver.
+                    val uri = filePayload.asFile()!!.asUri()
+                    try {
+                        // Copy the file to a new location.
+                        val `in`: InputStream? = context.contentResolver.openInputStream(uri!!)
+                        copyStream(
+                            `in`, FileOutputStream(
+                                File(
+                                    context.cacheDir, filename
+                                )
+                            )
+                        )
+                    } catch (e: IOException) {
+                        // Log the error.
+                    } finally {
+                        // Delete the original file.
+                        context.contentResolver.delete(uri!!, null, null)
+                    }
+                } else {
+                    val payloadFile = filePayload.asFile()!!.asJavaFile()
+
+                    // Rename the file.
+                    payloadFile!!.renameTo(File(payloadFile.parentFile, filename))
+                }
+            }
+        }
+
+        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+                val payloadId = update.payloadId
+                val payload = incomingFilePayloads.remove(payloadId)
+                completedFilePayloads.put(payloadId, payload)
+                if (payload!!.type == Payload.Type.FILE) {
+                    processFilePayload(payloadId)
+                }
+            }
+        }
+
+        companion object {
+            /** Copies a stream from one location to another.  */
+            @Throws(IOException::class)
+            private fun copyStream(`in`: InputStream?, out: OutputStream) {
+                try {
+                    val buffer = ByteArray(1024)
+                    var read: Int
+                    while (`in`!!.read(buffer).also { read = it } != -1) {
+                        out.write(buffer, 0, read)
+                    }
+                    out.flush()
+                } finally {
+                    `in`!!.close()
+                    out.close()
+                }
+            }
+        }
+    }
+
     private val endpointDiscoveryCallback: EndpointDiscoveryCallback =
         object : EndpointDiscoveryCallback() {
             override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
                 // An endpoint was found. We request a connection to it.
                 Nearby.getConnectionsClient(context)
                     .requestConnection(getLocalUserName(), endpointId, connectionLifecycleCallback)
-                    .addOnSuccessListener { unused: Void? -> }
-                    .addOnFailureListener { e: java.lang.Exception? -> }
+                    .addOnSuccessListener(
+                        OnSuccessListener { unused: Void? -> })
+                    .addOnFailureListener(
+                        OnFailureListener { e: java.lang.Exception? -> })
             }
 
             override fun onEndpointLost(endpointId: String) {
@@ -147,6 +361,7 @@ class Connection : AppCompatActivity() {
 
     private val connectionLifecycleCallback: ConnectionLifecycleCallback =
         object : ConnectionLifecycleCallback() {
+
             override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
                 // Automatically accept the connection on both sides.
                 Nearby.getConnectionsClient(context).acceptConnection(endpointId, payloadCallback)
@@ -158,12 +373,10 @@ class Connection : AppCompatActivity() {
                 when (result.status.statusCode) {
                     ConnectionsStatusCodes.STATUS_OK -> {
                         connectionReport.text = "Connection Made!"
-                        val timestamp = Timestamp(System.currentTimeMillis())
-
-                        val bytesPayload = Payload.fromBytes(serialize(timestamp))
-                        Log.d("MESSAGE", bytesPayload.toString())
-                        if(isAdvertising)
-                            Nearby.getConnectionsClient(context).sendPayload(endpointId, bytesPayload)
+                        if (isAdvertising) {
+//                            sendPayLoad(endpointId)
+                            showImageChooser(endpointId)
+                        }
                     }
                     ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED -> {}
                     ConnectionsStatusCodes.STATUS_ERROR -> {}
@@ -178,23 +391,127 @@ class Connection : AppCompatActivity() {
         }
 
     private val payloadCallback: PayloadCallback = object : PayloadCallback() {
+        private val context: Context? = null
+        private var incomingFilePayloads = SimpleArrayMap<Long, Payload>()
+        private var completedFilePayloads = SimpleArrayMap<Long, Payload>()
+        private var filePayloadFilenames = SimpleArrayMap<Long, String>()
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            // This always gets the full data of the payload. Is null if it's not a BYTES payload.
-            if (payload.type == Payload.Type.BYTES) {
-                val receivedBytes = SerializationHelper.deserialize(payload.asBytes())
-                Log.d("MESSAGE", receivedBytes.toString())
+            // A new payload is being sent over.
+            Log.d(TAG, "Payload Received")
+            when (payload.type) {
+                Payload.Type.BYTES -> {
+                    val payloadFilenameMessage = String(payload.asBytes()!!, StandardCharsets.UTF_8)
 
-                val dataDisplay: TextView = findViewById<TextView>(R.id.data_received)
-                dataDisplay.text = "Message: $receivedBytes"
+//                    val payloadFilenameMessage = SerializationHelper.deserialize(payload.asBytes())
+
+                    val payloadId: Long = addPayloadFilename(payloadFilenameMessage)
+                    processFilePayload(payloadId)
+//                    var rcvdFilename = String(payload.asBytes()!!, StandardCharsets.UTF_8)
+                    Log.d(TAG, payload.asBytes().toString())
+                    val dataDisplay: TextView = findViewById<TextView>(R.id.data_received)
+                    dataDisplay.text = payloadFilenameMessage
+                }
+                Payload.Type.FILE -> {
+                    Log.d(TAG, "receiving file?")
+                    // Add this to our tracking map, so that we can retrieve the payload later.
+                    incomingFilePayloads.put(payload.id, payload);
+                }
+//                Payload.Type.STREAM -> {
+//                    Log.d(TAG, "Inside file mode")
+//                }
             }
         }
 
-        override fun onPayloadTransferUpdate(
-            endpointId: String,
-            update: PayloadTransferUpdate
-        ) {
-            // Bytes payloads are sent as a single chunk, so you'll receive a SUCCESS update immediately
-            // after the call to onPayloadReceived().
+        /**
+         * Extracts the payloadId and filename from the message and stores it in the
+         * filePayloadFilenames map. The format is payloadId:filename.
+         */
+        private fun addPayloadFilename(payloadFilenameMessage: String): Long {
+            Log.d("PATH", "IN ADDPAYFIL")
+            val parts = payloadFilenameMessage.split(":").toTypedArray()
+            val payloadId = parts[0].toLong()
+            val filename = parts[1]
+            filePayloadFilenames.put(payloadId, filename)
+            return payloadId
+        }
+
+        private fun copyStream(`in`: InputStream?, out: OutputStream) {
+            try {
+                val buffer = ByteArray(1024)
+                var read: Int
+                while (`in`!!.read(buffer).also { read = it } != -1) {
+                    out.write(buffer, 0, read)
+                }
+                out.flush()
+            } finally {
+                `in`!!.close()
+                out.close()
+            }
+        }
+
+        private fun processFilePayload(payloadId: Long) {
+            Log.d("PATH", "IN PROCFILE")
+            // BYTES and FILE could be received in any order, so we call when either the BYTES or the FILE
+            // payload is completely received. The file payload is considered complete only when both have
+            // been received.
+            val filePayload = completedFilePayloads[payloadId]
+            val filename: String? = filePayloadFilenames.get(payloadId)
+            if(filename != null)
+                Log.d("PFP", filename)
+            if (filePayload != null && filename != null) {
+                completedFilePayloads.remove(payloadId)
+                filePayloadFilenames.remove(payloadId)
+
+                Log.d("DOWN", "ABOVE REMOVE DOWN")
+
+
+                // Get the received file (which will be in the Downloads folder)
+                // Because of https://developer.android.com/preview/privacy/scoped-storage, we are not
+                // allowed to access filepaths from another process directly. Instead, we must open the
+                // uri using our ContentResolver.
+                val uri: Uri? = filePayload.asFile()!!.asUri()
+
+                lateinit var imageView: ImageView
+                imageView = findViewById(R.id.imageView)
+                imageView.setImageURI(uri)
+
+                try {
+                    // Copy the file to a new location.
+                    val `in` = uri?.let { context?.contentResolver?.openInputStream(it) }
+                    copyStream(`in`, FileOutputStream(File(context?.cacheDir, filename)))
+                } catch (e: IOException) {
+                    // Log the error.
+                } finally {
+                    // Delete the original file.
+                    if (uri != null) {
+                        context?.contentResolver?.delete(uri, null, null)
+                    }
+                }
+                Log.d("NAME", uri.toString())
+                Log.d("NAME", filename)
+
+
+
+
+            }
+        }
+
+        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+                Log.d("PATH", "ST SUCC")
+
+                val payloadId = update.payloadId
+                val payload = incomingFilePayloads.remove(payloadId)
+                completedFilePayloads.put(payloadId, payload)
+
+                Log.d("PATH", completedFilePayloads.toString())
+
+                if (payload != null && payload.type == Payload.Type.FILE) {
+                    processFilePayload(payloadId)
+                }
+//                processFilePayload(payloadId)
+
+            }
         }
     }
 
@@ -218,43 +535,89 @@ class Connection : AppCompatActivity() {
             return objectInputStream.readObject()
         }
     }
-}
 
-//    private fun showImageChooser(endpointId: String) {
-//        this.eid = endpointId
-//        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
-//        intent.addCategory(Intent.CATEGORY_OPENABLE)
-//        intent.type = "image/*"
-//        intent.putExtra(ENDPOINT_ID_EXTRA, endpointId)
-//        startActivityForResult(intent, READ_REQUEST_CODE)
-//        Log.d(TAG, "end img")
-//    }
+//        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+//            val dataDisplay: TextView = findViewById<TextView>(R.id.data_received)
 //
-//    override fun onActivityResult(requestCode: Int, resultCode: Int, resultData: Intent?) {
-//        super.onActivityResult(requestCode, resultCode, resultData)
-//        if (requestCode == READ_REQUEST_CODE && resultCode == RESULT_OK && resultData != null) {
-//            val endpointId = resultData.getStringExtra(ENDPOINT_ID_EXTRA)
 //
-//            // The URI of the file selected by the user.
-//            val uri: Uri? = resultData.data
-//            val filePayload: Payload = try {
-//                // Open the ParcelFileDescriptor for this URI with read access.
-//                val pfd = uri?.let { contentResolver.openFileDescriptor(it, "r") }
-//                Payload.fromFile(pfd!!)
-//            } catch (e: FileNotFoundException) {
-//                Log.e("MyApp", "File not found", e)
-//                return
+////            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+////                val payloadId = update.payloadId
+////                val payload = incomingFilePayloads.remove(payloadId)
+////                completedFilePayloads.put(payloadId, payload)
+////                if (payload != null && payload.type == Payload.Type.FILE) {
+//////                    val isDone = processFilePayload(payloadId, endpointId)
+////                    val isDone = true // REPLACE JUST A TEST
+////                    if (isDone) {
+////                        Log.d(TAG, "above")
+////                        Log.d(TAG, payload.toString())
+////                        Log.d(TAG, "below")
+////                        Nearby.getConnectionsClient(context).disconnectFromEndpoint(endpointId) //test
+////                    }
+////                }
+////            }
+//
+//            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+//                val payloadId = update.payloadId
+//                val payload = incomingFilePayloads.remove(payloadId)
+//                completedFilePayloads.put(payloadId, payload)
+//                Log.d(TAG, "successful send")
+////                count++
+//                dataDisplay.text = payload?.asBytes().toString()
+//
+//                if (payload != null && payload.type == Payload.Type.FILE) {
+////                    val isDone = processFilePayload(payloadId, endpointId)
+//                    val isDone = false
+//
+//                    if (isDone) {
+//                        Nearby.getConnectionsClient(context!!)
+//                            .disconnectFromEndpoint(endpointId) //test
+//                    }
+//                }
 //            }
-//
-//            // Construct a simple message mapping the ID of the file payload to the desired filename.
-//            val filenameMessage = filePayload.id.toString() + ":" + uri.lastPathSegment
-//
-//            // Send the filename message as a bytes payload.
-//            val filenameBytesPayload =
-//                Payload.fromBytes(filenameMessage.toByteArray(StandardCharsets.UTF_8))
-//            Nearby.getConnectionsClient(context).sendPayload(endpointId!!, filenameBytesPayload)
-//
-//            // Finally, send the file payload.
-//            Nearby.getConnectionsClient(context).sendPayload(endpointId, filePayload)
+////            if (update.status === PayloadTransferUpdate.Status.SUCCESS) {
+////                val payloadId = update.payloadId
+////                val payload = incomingFilePayloads.remove(payloadId)
+////                completedFilePayloads.put(payloadId, payload)
+////                if (payload!!.type == Payload.Type.FILE) {
+////                    processFilePayload(payloadId)
+////                }
+////            }
 //        }
 //    }
+
+//    fun onConnectionInitiated(endpointId: String?, info: ConnectionInfo) {
+//        Builder(context)
+//            .setTitle("Accept connection to " + info.endpointName)
+//            .setMessage("Confirm the code matches on both devices: " + info.authenticationDigits)
+//            .setPositiveButton(
+//                "Accept"
+//            ) { dialog: DialogInterface?, which: Int ->  // The user confirmed, so we can accept the connection.
+//                Nearby.getConnectionsClient(context)
+//                    .acceptConnection(endpointId!!, payloadCallback)
+//            }
+//            .setNegativeButton(
+//                android.R.string.cancel
+//            ) { dialog: DialogInterface?, which: Int ->  // The user canceled, so we should reject the connection.
+//                Nearby.getConnectionsClient(context).rejectConnection(endpointId!!)
+//            }
+//            .setIcon(android.R.drawable.ic_dialog_alert)
+//            .show()
+//    }
+
+//    Payload bytesPayload = Payload.fromBytes(new byte[] {0xa, 0xb, 0xc, 0xd});
+//    Nearby.getConnectionsClient(context).sendPayload(toEndpointId, bytesPayload);
+
+//    internal class ReceiveBytesPayloadListener : PayloadCallback() {
+//        override fun onPayloadReceived(endpointId: String, payload: Payload) {
+//            // This always gets the full data of the payload. Is null if it's not a BYTES payload.
+//            if (payload.type == Payload.Type.BYTES) {
+//                val receivedBytes = payload.asBytes()
+//            }
+//        }
+//
+//        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+//            // Bytes payloads are sent as a single chunk, so you'll receive a SUCCESS update immediately
+//            // after the call to onPayloadReceived().
+//        }
+//    }
+}
