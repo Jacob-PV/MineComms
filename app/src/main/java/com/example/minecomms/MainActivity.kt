@@ -35,4 +35,11 @@ class MainActivity : AppCompatActivity() {
         intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
         startActivity(intent)
     }
+
+    fun sensorsView(view: View?) {
+        Log.d("HERE", "SENSOR VIEW")
+        val intent = Intent(this, Sensors::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+        startActivity(intent)
+    }
 }

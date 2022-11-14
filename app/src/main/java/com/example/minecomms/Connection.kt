@@ -364,6 +364,8 @@ class Connection : AppCompatActivity() {
 
             override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
                 // Automatically accept the connection on both sides.
+                Log.d("CONINFO", connectionInfo.toString())
+                Log.d("CONINFO", endpointId.toString())
                 Nearby.getConnectionsClient(context).acceptConnection(endpointId, payloadCallback)
             }
 
@@ -477,9 +479,11 @@ class Connection : AppCompatActivity() {
 
                 try {
                     // Copy the file to a new location.
+                    Log.d("DOWN", "MOVING FILE")
                     val `in` = uri?.let { context?.contentResolver?.openInputStream(it) }
                     copyStream(`in`, FileOutputStream(File(context?.cacheDir, filename)))
                 } catch (e: IOException) {
+                    Log.d("DOWN", e.toString())
                     // Log the error.
                 } finally {
                     // Delete the original file.

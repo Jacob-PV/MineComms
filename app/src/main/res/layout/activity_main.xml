@@ -51,5 +51,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@+id/camera_button" />
 
+    <Button
+        android:id="@+id/sensors_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:onClick="sensorsView"
+        android:text="Sensors"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/account_button" />
+
 
 </androidx.constraintlayout.widget.ConstraintLayout>
